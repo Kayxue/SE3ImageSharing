@@ -1,7 +1,13 @@
 use std::{io::Cursor, path::PathBuf, sync::OnceLock};
 
 use axum::{
-    Router, body::{Body, Bytes}, extract::Path, http::{Response, StatusCode, header}, middleware, response::IntoResponse, routing::{delete, get, post}
+    Router,
+    body::{Body, Bytes},
+    extract::Path,
+    http::{Response, StatusCode, header},
+    middleware,
+    response::IntoResponse,
+    routing::{delete, get, post},
 };
 use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
 use image::{EncodableLayout, ImageFormat, ImageReader};
@@ -24,25 +30,30 @@ async fn upload_image(TypedMultipart(body): TypedMultipart<UploadImageForm>) -> 
     let image_dir = IMAGE_DIR.get().expect("IMAGE_DIR not set");
     let image_name = nanoid!();
 
-    match ImageReader::new(Cursor::new(body.image.contents.as_bytes()))
-        .with_guessed_format()
-        .unwrap()
-        .decode()
-    {
-        Ok(image) => {
-            let mut cursor = Cursor::new(Vec::new());
-            image.write_to(&mut cursor, ImageFormat::WebP).unwrap();
-            fs::write(
-                format!("{}/{}.webp", image_dir, image_name),
-                cursor.into_inner(),
+    match ImageReader::new(Cursor::new(body.image.contents.as_bytes())).with_guessed_format() {
+        Ok(image) => match image.decode() {
+            Ok(image) => {
+                let mut cursor = Cursor::new(Vec::new());
+                image.write_to(&mut cursor, ImageFormat::WebP).unwrap();
+                fs::write(
+                    format!("{}/{}.webp", image_dir, image_name),
+                    cursor.into_inner(),
+                )
+                .await
+                .unwrap();
+                (axum::http::StatusCode::CREATED, image_name).into_response()
+            }
+            Err(e) => (
+                axum::http::StatusCode::BAD_REQUEST,
+                format!("Invalid image: {}", e),
             )
-            .await
-            .unwrap();
-            (axum::http::StatusCode::CREATED, image_name).into_response()
-        }
-        Err(e) => {
-            return (axum::http::StatusCode::BAD_REQUEST, e.to_string()).into_response();
-        }
+                .into_response(),
+        },
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("Cannot read image: {}", e),
+        )
+            .into_response(),
     }
 }
 
@@ -60,7 +71,7 @@ async fn delete_image(Path(id): Path<String>) -> impl IntoResponse {
 async fn get_image(Path(id): Path<String>) -> impl IntoResponse {
     let image_dir = IMAGE_DIR.get().expect("IMAGE_DIR not set");
     let image_path = format!("{}/{}.webp", image_dir, id);
-    let file = match fs::File::open(image_path).await{
+    let file = match fs::File::open(image_path).await {
         Ok(file) => file,
         Err(e) => return (axum::http::StatusCode::NOT_FOUND, e.to_string()).into_response(),
     };
