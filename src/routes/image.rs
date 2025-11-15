@@ -7,7 +7,7 @@ use axum::{
     http::{Response, StatusCode, header},
     middleware,
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
 use image::{EncodableLayout, ImageFormat, ImageReader};
@@ -68,6 +68,34 @@ async fn delete_image(Path(id): Path<String>) -> impl IntoResponse {
     }
 }
 
+async fn update_image(Path(id): Path<String>, TypedMultipart(body): TypedMultipart<UploadImageForm>) -> impl IntoResponse {
+    let image_dir = IMAGE_DIR.get().expect("IMAGE_DIR not set");
+    let image_path = format!("{}/{}.webp", image_dir, id);
+    if !PathBuf::from(&image_path).exists() {
+        return (axum::http::StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    match ImageReader::new(Cursor::new(body.image.contents.as_bytes())).with_guessed_format() {
+        Ok(image) => match image.decode() {
+            Ok(image) => {
+                let mut cursor = Cursor::new(Vec::new());
+                image.write_to(&mut cursor, ImageFormat::WebP).unwrap();
+                fs::write(image_path, cursor.into_inner()).await.unwrap();
+                (axum::http::StatusCode::OK, "Updated").into_response()
+            }
+            Err(e) => (
+                axum::http::StatusCode::BAD_REQUEST,
+                format!("Invalid image: {}", e),
+            )
+                .into_response(),
+        },
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("Cannot read image: {}", e),
+        )
+            .into_response(),
+    }
+}
+
 async fn get_image(Path(id): Path<String>) -> impl IntoResponse {
     let image_dir = IMAGE_DIR.get().expect("IMAGE_DIR not set");
     let image_path = format!("{}/{}.webp", image_dir, id);
@@ -95,6 +123,7 @@ pub fn image_router(api_key: String, image_dir: String) -> Router {
     let api_key_required = Router::new()
         .route("/", post(upload_image))
         .route("/{id}", delete(delete_image))
+        .route("/{id}", put(update_image))
         .route_layer(middleware::from_fn(checking_api_key(api_key)));
 
     Router::new()
