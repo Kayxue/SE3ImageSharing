@@ -1,3 +1,7 @@
+#[cfg(all(target_env = "musl", not(target_os = "macos")))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::{env, net::SocketAddr};
 
 use axum::{Router, extract::DefaultBodyLimit};
